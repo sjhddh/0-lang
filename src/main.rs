@@ -1,6 +1,4 @@
-//! ZeroLang - Agent-to-Agent Programming Language
-//! 
-//! No syntax sugar. No whitespace. No variable names. Pure logic density.
+//! ZeroLang CLI - The first language for machines, by machines
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -8,15 +6,10 @@ use std::path::PathBuf;
 
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
-use clap::{Parser, Subcommand};
-use sha2::{Sha256, Digest};
+use clap::{Parser, Subcommand, ValueEnum};
 
-// Include the generated Cap'n Proto types
-pub mod zero_capnp {
-    include!(concat!(env!("OUT_DIR"), "/zero_capnp.rs"));
-}
-
-use zero_capnp::{graph, node, proof};
+use zerolang::zero_capnp::{graph, node, proof, Operation};
+use zerolang::{compute_hash, RuntimeGraph, Tensor, VM};
 
 /// ZeroLang CLI - The first language for machines, by machines
 #[derive(Parser)]
@@ -33,8 +26,11 @@ enum Commands {
     Generate {
         /// Output file path
         output: PathBuf,
+        /// Type of graph to generate
+        #[arg(short, long, default_value = "hello")]
+        graph_type: GraphType,
     },
-    /// Execute a Zero graph file
+    /// Execute a Zero graph file using the 0-VM
     Execute {
         /// Input file path
         input: PathBuf,
@@ -46,14 +42,23 @@ enum Commands {
     },
 }
 
+#[derive(Clone, ValueEnum)]
+enum GraphType {
+    /// The Genesis Block - Hello World embedding
+    Hello,
+    /// Simple math: 1.0 + 2.0 = 3.0
+    Math,
+}
+
+// ============================================================================
+// GENERATORS
+// ============================================================================
+
 /// The "Hello" concept encoded as a 768-dimensional embedding vector.
-/// In a real system, this would be the actual embedding from an LLM.
-/// For now, we use a deterministic pattern that spells "HELLO" in the first 5 dimensions.
 fn hello_embedding() -> Vec<f32> {
     let mut embedding = vec![0.0f32; 768];
     
     // Encode "HELLO" as ASCII values normalized to [0, 1]
-    // H=72, E=69, L=76, L=76, O=79
     embedding[0] = 72.0 / 255.0;  // H
     embedding[1] = 69.0 / 255.0;  // E
     embedding[2] = 76.0 / 255.0;  // L
@@ -61,19 +66,11 @@ fn hello_embedding() -> Vec<f32> {
     embedding[4] = 79.0 / 255.0;  // O
     
     // Fill remaining dimensions with a recognizable pattern
-    // (sine wave based on position - creates a unique "fingerprint")
     for i in 5..768 {
         embedding[i] = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
     }
     
     embedding
-}
-
-/// Compute SHA-256 hash of data
-fn compute_hash(data: &[u8]) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    hasher.finalize().to_vec()
 }
 
 /// Generate the "Hello World" graph - the Genesis Block of ZeroLang
@@ -82,61 +79,42 @@ fn generate_hello_world(output: &PathBuf) -> Result<(), Box<dyn std::error::Erro
     
     {
         let mut graph_builder = message.init_root::<graph::Builder>();
-        
-        // Set version to 0 (Protocol 0)
         graph_builder.set_version(0);
         
-        // Create the embedding data
         let embedding = hello_embedding();
         let embedding_bytes: Vec<u8> = embedding.iter()
             .flat_map(|f| f.to_le_bytes())
             .collect();
         let node_hash = compute_hash(&embedding_bytes);
         
-        // Create nodes list with one node
         let mut nodes = graph_builder.reborrow().init_nodes(1);
         
         {
             let mut node_builder = nodes.reborrow().get(0);
-            
-            // Set node ID (content-addressable hash)
             {
                 let mut id_builder = node_builder.reborrow().init_id();
                 id_builder.set_hash(&node_hash);
             }
-            
-            // Set node as constant tensor (the "Hello" embedding)
             {
                 let mut tensor_builder = node_builder.init_constant();
-                
-                // Shape: [768] - a 768-dimensional vector
                 let mut shape = tensor_builder.reborrow().init_shape(1);
                 shape.set(0, 768);
-                
-                // Data: the actual embedding values
                 let mut data = tensor_builder.reborrow().init_data(768);
                 for (i, &val) in embedding.iter().enumerate() {
                     data.set(i as u32, val);
                 }
-                
-                // Confidence: 1.0 (100% certain this is "Hello")
                 tensor_builder.set_confidence(1.0);
             }
         }
         
-        // Set entry point and outputs to the single node
         {
             let mut entry = graph_builder.reborrow().init_entry_point();
             entry.set_hash(&node_hash);
         }
-        
         {
             let mut outputs = graph_builder.reborrow().init_outputs(1);
-            let mut output_id = outputs.reborrow().get(0);
-            output_id.set_hash(&node_hash);
+            outputs.reborrow().get(0).set_hash(&node_hash);
         }
-        
-        // Add a halting proof (trivial - single constant node always halts)
         {
             let mut proofs = graph_builder.reborrow().init_proofs(1);
             let proof_builder = proofs.reborrow().get(0);
@@ -144,8 +122,6 @@ fn generate_hello_world(output: &PathBuf) -> Result<(), Box<dyn std::error::Erro
             halting.set_max_steps(1);
             halting.set_fuel_budget(1);
         }
-        
-        // Set metadata
         {
             let mut metadata = graph_builder.reborrow().get_metadata();
             metadata.set_created_by(b"zerolang-genesis");
@@ -156,90 +132,167 @@ fn generate_hello_world(output: &PathBuf) -> Result<(), Box<dyn std::error::Erro
         }
     }
     
-    // Write to file
     let file = File::create(output)?;
     let mut writer = BufWriter::new(file);
     serialize::write_message(&mut writer, &message)?;
     
     println!("Generated: {}", output.display());
     println!("  Type: Genesis Block (Hello World)");
-    println!("  Nodes: 1");
+    println!("  Nodes: 1 (Constant)");
     println!("  Output: Tensor<768> with confidence 1.0");
-    println!("  Hash: {}", hex::encode(&compute_hash(&embedding_bytes())));
     
     Ok(())
 }
 
-/// Helper to regenerate embedding bytes for hash display
-fn embedding_bytes() -> Vec<u8> {
-    hello_embedding().iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect()
+/// Generate a simple math graph: 1.0 + 2.0 = 3.0
+fn generate_simple_math(output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let mut message = Builder::new_default();
+    
+    {
+        let mut graph_builder = message.init_root::<graph::Builder>();
+        graph_builder.set_version(0);
+        
+        // Create tensors for hashing
+        let tensor_a = Tensor::scalar(1.0, 1.0);
+        let tensor_b = Tensor::scalar(2.0, 1.0);
+        
+        let hash_a = compute_hash(&tensor_a.to_bytes());
+        let hash_b = compute_hash(&tensor_b.to_bytes());
+        
+        // Hash for the operation node (hash of operation + inputs)
+        let mut op_content = vec![0u8]; // Operation::Add = 0
+        op_content.extend(&hash_a);
+        op_content.extend(&hash_b);
+        let hash_result = compute_hash(&op_content);
+        
+        // Create 3 nodes: A=1.0, B=2.0, Result=A+B
+        let mut nodes = graph_builder.reborrow().init_nodes(3);
+        
+        // Node A: Constant 1.0
+        {
+            let mut node_builder = nodes.reborrow().get(0);
+            node_builder.reborrow().init_id().set_hash(&hash_a);
+            let mut tensor_builder = node_builder.init_constant();
+            tensor_builder.reborrow().init_shape(1).set(0, 1);
+            tensor_builder.reborrow().init_data(1).set(0, 1.0);
+            tensor_builder.set_confidence(1.0);
+        }
+        
+        // Node B: Constant 2.0
+        {
+            let mut node_builder = nodes.reborrow().get(1);
+            node_builder.reborrow().init_id().set_hash(&hash_b);
+            let mut tensor_builder = node_builder.init_constant();
+            tensor_builder.reborrow().init_shape(1).set(0, 1);
+            tensor_builder.reborrow().init_data(1).set(0, 2.0);
+            tensor_builder.set_confidence(1.0);
+        }
+        
+        // Node Result: A + B
+        {
+            let mut node_builder = nodes.reborrow().get(2);
+            node_builder.reborrow().init_id().set_hash(&hash_result);
+            let mut op_builder = node_builder.init_operation();
+            op_builder.set_op(Operation::Add);
+            let mut inputs = op_builder.reborrow().init_inputs(2);
+            inputs.reborrow().get(0).set_hash(&hash_a);
+            inputs.reborrow().get(1).set_hash(&hash_b);
+        }
+        
+        // Entry point is first constant
+        graph_builder.reborrow().init_entry_point().set_hash(&hash_a);
+        
+        // Output is the result node
+        {
+            let mut outputs = graph_builder.reborrow().init_outputs(1);
+            outputs.reborrow().get(0).set_hash(&hash_result);
+        }
+        
+        // Halting proof
+        {
+            let mut proofs = graph_builder.reborrow().init_proofs(1);
+            let proof_builder = proofs.reborrow().get(0);
+            let mut halting = proof_builder.init_halting();
+            halting.set_max_steps(3);
+            halting.set_fuel_budget(1);
+        }
+        
+        // Metadata
+        {
+            let mut metadata = graph_builder.reborrow().get_metadata();
+            metadata.set_created_by(b"zerolang-math");
+            metadata.set_created_at(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs());
+            metadata.set_description(b"Simple Math: 1.0 + 2.0 = 3.0");
+        }
+    }
+    
+    let file = File::create(output)?;
+    let mut writer = BufWriter::new(file);
+    serialize::write_message(&mut writer, &message)?;
+    
+    println!("Generated: {}", output.display());
+    println!("  Type: Simple Math (1.0 + 2.0)");
+    println!("  Nodes: 3 (2 Constants + 1 Add Operation)");
+    println!("  Expected Output: 3.0");
+    
+    Ok(())
 }
 
-/// Execute a Zero graph file
+// ============================================================================
+// EXECUTOR
+// ============================================================================
+
+/// Execute a Zero graph file using the 0-VM
 fn execute_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::open(input)?;
-    let reader = BufReader::new(file);
-    let message_reader = serialize::read_message(reader, ReaderOptions::new())?;
-    let graph_reader = message_reader.get_root::<graph::Reader>()?;
+    println!("Loading: {}", input.display());
     
-    println!("Executing: {}", input.display());
-    println!("  Protocol Version: {}", graph_reader.get_version());
+    // Load the graph
+    let graph = RuntimeGraph::load_from_file(input)?;
     
-    // Get the output nodes
-    let outputs = graph_reader.get_outputs()?;
-    let nodes = graph_reader.get_nodes()?;
+    println!("  Protocol Version: {}", graph.version);
+    println!("  Nodes: {}", graph.node_count());
     
-    println!("  Output Nodes: {}", outputs.len());
+    // Create VM and execute
+    let mut vm = VM::new();
+    let outputs = vm.execute(&graph)?;
     
-    // Simple execution: just retrieve the output tensor values
-    for (i, output_id) in outputs.iter().enumerate() {
-        let output_hash = output_id.get_hash()?;
+    println!("\n  Execution Statistics:");
+    println!("    Operations: {}", vm.ops_executed());
+    println!("    Remaining Fuel: {}", vm.remaining_fuel());
+    
+    println!("\n  Outputs ({}):", outputs.len());
+    for (i, tensor) in outputs.iter().enumerate() {
+        println!("    [{}] Shape: {:?}", i, tensor.shape);
+        println!("        Confidence: {:.2}%", tensor.confidence * 100.0);
         
-        // Find the node with this hash
-        for node in nodes.iter() {
-            let node_id = node.get_id()?;
-            let node_hash = node_id.get_hash()?;
+        if tensor.is_scalar() {
+            println!("        Value: {}", tensor.as_scalar());
+        } else if tensor.numel() <= 10 {
+            println!("        Data: {:?}", tensor.data);
+        } else {
+            // For large tensors, show preview
+            let preview: Vec<f32> = tensor.data.iter().take(5).copied().collect();
+            println!("        Data: {:?}... ({} elements)", preview, tensor.numel());
             
-            if node_hash == output_hash {
-                match node.which()? {
-                    node::Constant(tensor_reader) => {
-                        let tensor = tensor_reader?;
-                        let shape: Vec<u32> = tensor.get_shape()?.iter().collect();
-                        let confidence = tensor.get_confidence();
-                        let data = tensor.get_data()?;
-                        
-                        println!("\n  Output {}:", i);
-                        println!("    Shape: {:?}", shape);
-                        println!("    Confidence: {:.2}%", confidence * 100.0);
-                        
-                        // Decode the "Hello" message from first 5 dimensions
-                        if data.len() >= 5 {
-                            let decoded: String = (0..5)
-                                .map(|i| (data.get(i) * 255.0) as u8 as char)
-                                .collect();
-                            println!("    Decoded Message: \"{}\"", decoded);
-                        }
-                        
-                        // Show first few values
-                        let preview: Vec<f32> = (0..5.min(data.len() as usize))
-                            .map(|i| data.get(i as u32))
-                            .collect();
-                        println!("    Data Preview: {:?}...", preview);
-                    }
-                    _ => {
-                        println!("  Output {}: (operation node - would require VM execution)", i);
-                    }
-                }
+            // Try to decode "HELLO" if it looks like an embedding
+            if tensor.shape == vec![768] && tensor.data.len() >= 5 {
+                let decoded: String = (0..5)
+                    .map(|i| (tensor.data[i] * 255.0) as u8 as char)
+                    .collect();
+                println!("        Decoded: \"{}\"", decoded);
             }
         }
     }
     
     println!("\nExecution complete.");
-    
     Ok(())
 }
+
+// ============================================================================
+// INSPECTOR
+// ============================================================================
 
 /// Inspect a Zero graph file (detailed debug view)
 fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -283,17 +336,22 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             node::Constant(tensor_reader) => {
                 let tensor = tensor_reader?;
                 let shape: Vec<u32> = tensor.get_shape()?.iter().collect();
-                println!("CONSTANT Tensor<{:?}> conf={:.2}", shape, tensor.get_confidence());
+                let data = tensor.get_data()?;
+                if shape == vec![1] && data.len() == 1 {
+                    println!("CONSTANT Scalar({}) conf={:.2}", data.get(0), tensor.get_confidence());
+                } else {
+                    println!("CONSTANT Tensor<{:?}> conf={:.2}", shape, tensor.get_confidence());
+                }
             }
-                node::Operation(op) => {
-                    println!("OPERATION {:?} inputs={}", op.get_op()?, op.get_inputs()?.len());
-                }
-                node::External(ext) => {
-                    println!("EXTERNAL uri={:?}", ext.get_uri()?);
-                }
-                node::Branch(br) => {
-                    println!("BRANCH threshold={:.2}", br.get_threshold());
-                }
+            node::Operation(op) => {
+                println!("OPERATION {:?} inputs={}", op.get_op()?, op.get_inputs()?.len());
+            }
+            node::External(ext) => {
+                println!("EXTERNAL uri={:?}", ext.get_uri()?);
+            }
+            node::Branch(br) => {
+                println!("BRANCH threshold={:.2}", br.get_threshold());
+            }
         }
     }
     println!("└────────────────────────────────────────────────────────────────");
@@ -330,11 +388,20 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// ============================================================================
+// MAIN
+// ============================================================================
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     
     match &cli.command {
-        Commands::Generate { output } => generate_hello_world(output)?,
+        Commands::Generate { output, graph_type } => {
+            match graph_type {
+                GraphType::Hello => generate_hello_world(output)?,
+                GraphType::Math => generate_simple_math(output)?,
+            }
+        }
         Commands::Execute { input } => execute_graph(input)?,
         Commands::Inspect { input } => inspect_graph(input)?,
     }
@@ -360,13 +427,5 @@ mod tests {
             .map(|i| (embedding[i] * 255.0) as u8 as char)
             .collect();
         assert_eq!(decoded, "HELLO");
-    }
-    
-    #[test]
-    fn test_hash_is_deterministic() {
-        let data = b"test data";
-        let h1 = compute_hash(data);
-        let h2 = compute_hash(data);
-        assert_eq!(h1, h2);
     }
 }
