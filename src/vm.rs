@@ -126,7 +126,7 @@ impl VM {
         // Get topological order
         let order = graph
             .topological_sort()
-            .map_err(|e| VMError::GraphError(e))?;
+            .map_err(VMError::GraphError)?;
 
         // Execute nodes in order
         for hash in order {
@@ -424,13 +424,12 @@ impl VM {
                 }
                 // Create a 768-dim embedding from the input tensor's data
                 // This is a placeholder - a real implementation might use a lookup table
+                let input_len = input_tensors[0].data.len().min(768);
                 let mut embedding = vec![0.0f32; 768];
-                for (i, &val) in input_tensors[0].data.iter().take(768).enumerate() {
-                    embedding[i] = val;
-                }
+                embedding[..input_len].copy_from_slice(&input_tensors[0].data[..input_len]);
                 // Fill remaining with deterministic pattern based on existing values
-                for i in input_tensors[0].data.len()..768 {
-                    embedding[i] = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
+                for (i, val) in embedding.iter_mut().enumerate().skip(input_len) {
+                    *val = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
                 }
                 Ok(Tensor {
                     shape: vec![768],
@@ -497,7 +496,7 @@ impl VM {
         self.memory
             .get(branch_hash)
             .ok_or_else(|| VMError::NodeNotComputed(hex::encode(branch_hash)))
-            .map(|t| t.clone())
+            .cloned()
     }
 
     /// Get the number of operations executed

@@ -21,8 +21,8 @@ pub fn hello_embedding() -> Vec<f32> {
     embedding[4] = 79.0 / 255.0; // O
 
     // Fill remaining dimensions with a recognizable pattern
-    for i in 5..768 {
-        embedding[i] = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
+    for (i, val) in embedding.iter_mut().enumerate().skip(5) {
+        *val = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
     }
 
     embedding
