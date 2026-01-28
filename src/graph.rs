@@ -22,10 +22,7 @@ pub enum RuntimeNode {
     /// A constant tensor value
     Constant(Tensor),
     /// An operation with inputs
-    Operation {
-        op: Op,
-        inputs: Vec<NodeHash>,
-    },
+    Operation { op: Op, inputs: Vec<NodeHash> },
     /// A branch (probabilistic control flow)
     Branch {
         condition: NodeHash,
@@ -98,7 +95,8 @@ impl RuntimeGraph {
     pub fn from_reader<R: std::io::BufRead>(reader: R) -> Result<Self, GraphError> {
         let message_reader = serialize::read_message(reader, ReaderOptions::new())
             .map_err(|e| GraphError::ParseError(e.to_string()))?;
-        let graph_reader = message_reader.get_root::<graph::Reader>()
+        let graph_reader = message_reader
+            .get_root::<graph::Reader>()
             .map_err(|e| GraphError::ParseError(e.to_string()))?;
 
         Self::from_capnp(graph_reader)
@@ -107,48 +105,57 @@ impl RuntimeGraph {
     /// Parse a graph from Cap'n Proto reader
     fn from_capnp(reader: graph::Reader) -> Result<Self, GraphError> {
         let version = reader.get_version();
-        
+
         // Parse entry point
-        let entry_point = reader.get_entry_point()
+        let entry_point = reader
+            .get_entry_point()
             .map_err(|e| GraphError::ParseError(e.to_string()))?
             .get_hash()
             .map_err(|e| GraphError::ParseError(e.to_string()))?
             .to_vec();
 
         // Parse outputs
-        let outputs_reader = reader.get_outputs()
+        let outputs_reader = reader
+            .get_outputs()
             .map_err(|e| GraphError::ParseError(e.to_string()))?;
         let mut outputs = Vec::new();
         for output in outputs_reader.iter() {
-            let hash = output.get_hash()
+            let hash = output
+                .get_hash()
                 .map_err(|e| GraphError::ParseError(e.to_string()))?
                 .to_vec();
             outputs.push(hash);
         }
 
         // Parse nodes
-        let nodes_reader = reader.get_nodes()
+        let nodes_reader = reader
+            .get_nodes()
             .map_err(|e| GraphError::ParseError(e.to_string()))?;
         let mut nodes = HashMap::new();
 
         for node_reader in nodes_reader.iter() {
-            let id = node_reader.get_id()
+            let id = node_reader
+                .get_id()
                 .map_err(|e| GraphError::ParseError(e.to_string()))?;
-            let hash = id.get_hash()
+            let hash = id
+                .get_hash()
                 .map_err(|e| GraphError::ParseError(e.to_string()))?
                 .to_vec();
 
-            let runtime_node = match node_reader.which()
-                .map_err(|e| GraphError::ParseError(e.to_string()))? 
+            let runtime_node = match node_reader
+                .which()
+                .map_err(|e| GraphError::ParseError(e.to_string()))?
             {
                 node::Constant(tensor_reader) => {
-                    let tensor = tensor_reader
-                        .map_err(|e| GraphError::ParseError(e.to_string()))?;
-                    let shape: Vec<u32> = tensor.get_shape()
+                    let tensor =
+                        tensor_reader.map_err(|e| GraphError::ParseError(e.to_string()))?;
+                    let shape: Vec<u32> = tensor
+                        .get_shape()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .iter()
                         .collect();
-                    let data: Vec<f32> = tensor.get_data()
+                    let data: Vec<f32> = tensor
+                        .get_data()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .iter()
                         .collect();
@@ -157,13 +164,18 @@ impl RuntimeGraph {
                     RuntimeNode::Constant(Tensor::new(shape, data, confidence))
                 }
                 node::Operation(op_reader) => {
-                    let op = Op::from_capnp(op_reader.get_op()
-                        .map_err(|e| GraphError::ParseError(e.to_string()))?)?;
-                    let inputs_reader = op_reader.get_inputs()
+                    let op = Op::from_capnp(
+                        op_reader
+                            .get_op()
+                            .map_err(|e| GraphError::ParseError(e.to_string()))?,
+                    )?;
+                    let inputs_reader = op_reader
+                        .get_inputs()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?;
                     let mut inputs = Vec::new();
                     for input in inputs_reader.iter() {
-                        let input_hash = input.get_hash()
+                        let input_hash = input
+                            .get_hash()
                             .map_err(|e| GraphError::ParseError(e.to_string()))?
                             .to_vec();
                         inputs.push(input_hash);
@@ -171,18 +183,21 @@ impl RuntimeGraph {
                     RuntimeNode::Operation { op, inputs }
                 }
                 node::Branch(br) => {
-                    let condition = br.get_condition()
+                    let condition = br
+                        .get_condition()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .get_hash()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .to_vec();
                     let threshold = br.get_threshold();
-                    let true_branch = br.get_true_branch()
+                    let true_branch = br
+                        .get_true_branch()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .get_hash()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .to_vec();
-                    let false_branch = br.get_false_branch()
+                    let false_branch = br
+                        .get_false_branch()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
                         .get_hash()
                         .map_err(|e| GraphError::ParseError(e.to_string()))?
@@ -253,7 +268,12 @@ impl RuntimeGraph {
                         self.topo_dfs(input, visited, result)?;
                     }
                 }
-                RuntimeNode::Branch { condition, true_branch, false_branch, .. } => {
+                RuntimeNode::Branch {
+                    condition,
+                    true_branch,
+                    false_branch,
+                    ..
+                } => {
                     self.topo_dfs(condition, visited, result)?;
                     self.topo_dfs(true_branch, visited, result)?;
                     self.topo_dfs(false_branch, visited, result)?;

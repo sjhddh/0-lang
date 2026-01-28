@@ -3,10 +3,10 @@
 //! Replaces int, float, bool, string with probabilistic vectors.
 //! Every value carries a confidence score.
 
-use std::ops::{Add, Sub, Mul, Div};
+use std::ops::{Add, Div, Mul, Sub};
 
 /// The fundamental data type in ZeroLang.
-/// 
+///
 /// In traditional languages, you have `int`, `float`, `bool`, `string`.
 /// In ZeroLang, everything is a Tensor with a confidence score.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,7 +23,11 @@ pub struct Tensor {
 impl Tensor {
     /// Create a new tensor with given shape, data, and confidence
     pub fn new(shape: Vec<u32>, data: Vec<f32>, confidence: f32) -> Self {
-        Self { shape, data, confidence }
+        Self {
+            shape,
+            data,
+            confidence,
+        }
     }
 
     /// Create a scalar tensor (shape [1]) with a single value
@@ -118,7 +122,9 @@ impl Tensor {
             });
         }
 
-        let data: Vec<f32> = self.data.iter()
+        let data: Vec<f32> = self
+            .data
+            .iter()
             .zip(other.data.iter())
             .map(|(&a, &b)| op(a, b))
             .collect();
@@ -175,7 +181,11 @@ impl Tensor {
 
     /// Sigmoid activation: 1 / (1 + exp(-x))
     pub fn sigmoid(&self) -> Tensor {
-        let data: Vec<f32> = self.data.iter().map(|&x| 1.0 / (1.0 + (-x).exp())).collect();
+        let data: Vec<f32> = self
+            .data
+            .iter()
+            .map(|&x| 1.0 / (1.0 + (-x).exp()))
+            .collect();
         Tensor {
             shape: self.shape.clone(),
             data,
@@ -195,9 +205,7 @@ impl Tensor {
 
     /// Serialize tensor data to bytes (for hashing)
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.data.iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect()
+        self.data.iter().flat_map(|f| f.to_le_bytes()).collect()
     }
 }
 

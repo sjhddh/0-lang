@@ -2,10 +2,10 @@
 //!
 //! No syntax sugar. No whitespace. No variable names. Pure logic density.
 
-pub mod tensor;
 pub mod graph;
-pub mod vm;
 pub mod stdlib;
+pub mod tensor;
+pub mod vm;
 
 // Include the generated Cap'n Proto types
 pub mod zero_capnp {
@@ -13,11 +13,11 @@ pub mod zero_capnp {
 }
 
 // Re-export commonly used types
-pub use tensor::Tensor;
 pub use graph::RuntimeGraph;
+pub use tensor::Tensor;
 pub use vm::VM;
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// Compute SHA-256 hash of data
 pub fn compute_hash(data: &[u8]) -> Vec<u8> {

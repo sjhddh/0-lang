@@ -22,6 +22,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Cap'n Proto
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -52,6 +57,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Install Cap'n Proto
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
 
       - name: Check formatting
         run: cargo fmt --all -- --check

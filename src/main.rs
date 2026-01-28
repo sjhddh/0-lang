@@ -9,7 +9,7 @@ use capnp::serialize;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use zerolang::zero_capnp::{graph, node, proof};
-use zerolang::{RuntimeGraph, VM, stdlib};
+use zerolang::{stdlib, RuntimeGraph, VM};
 
 /// ZeroLang CLI - The first language for machines, by machines
 #[derive(Parser)]
@@ -56,7 +56,7 @@ enum GraphType {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    
+
     match &cli.command {
         Commands::Generate { output, graph_type } => {
             let timestamp = std::time::SystemTime::now()
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let file = File::create(output)?;
             let mut writer = BufWriter::new(file);
             serialize::write_message(&mut writer, &message)?;
-            
+
             println!("Generated: {}", output.display());
             match graph_type {
                 GraphType::Hello => {
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Execute { input } => execute_graph(input)?,
         Commands::Inspect { input } => inspect_graph(input)?,
     }
-    
+
     Ok(())
 }
 
@@ -100,26 +100,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Execute a Zero graph file using the 0-VM
 fn execute_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading: {}", input.display());
-    
+
     // Load the graph
     let graph = RuntimeGraph::load_from_file(input)?;
-    
+
     println!("  Protocol Version: {}", graph.version);
     println!("  Nodes: {}", graph.node_count());
-    
+
     // Create VM and execute
     let mut vm = VM::new();
     let outputs = vm.execute(&graph)?;
-    
+
     println!("\n  Execution Statistics:");
     println!("    Operations: {}", vm.ops_executed());
     println!("    Remaining Fuel: {}", vm.remaining_fuel());
-    
+
     println!("\n  Outputs ({}):", outputs.len());
     for (i, tensor) in outputs.iter().enumerate() {
         println!("    [{}] Shape: {:?}", i, tensor.shape);
         println!("        Confidence: {:.2}%", tensor.confidence * 100.0);
-        
+
         if tensor.is_scalar() {
             println!("        Value: {}", tensor.as_scalar());
         } else if tensor.numel() <= 10 {
@@ -127,8 +127,12 @@ fn execute_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             // For large tensors, show preview
             let preview: Vec<f32> = tensor.data.iter().take(5).copied().collect();
-            println!("        Data: {:?}... ({} elements)", preview, tensor.numel());
-            
+            println!(
+                "        Data: {:?}... ({} elements)",
+                preview,
+                tensor.numel()
+            );
+
             // Try to decode "HELLO" if it looks like an embedding
             if tensor.shape == vec![768] && tensor.data.len() >= 5 {
                 let decoded: String = (0..5)
@@ -138,7 +142,7 @@ fn execute_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     println!("\nExecution complete.");
     Ok(())
 }
@@ -153,7 +157,7 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let reader = BufReader::new(file);
     let message_reader = serialize::read_message(reader, ReaderOptions::new())?;
     let graph_reader = message_reader.get_root::<graph::Reader>()?;
-    
+
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                    ZERO GRAPH INSPECTOR                      ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
@@ -161,7 +165,7 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     println!("File: {}", input.display());
     println!("Protocol Version: {}", graph_reader.get_version());
     println!();
-    
+
     // Metadata
     let metadata = graph_reader.get_metadata();
     println!("┌─ METADATA ─────────────────────────────────────────────────────");
@@ -174,30 +178,45 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("└────────────────────────────────────────────────────────────────");
     println!();
-    
+
     // Nodes
     let nodes = graph_reader.get_nodes()?;
-    println!("┌─ NODES ({}) ──────────────────────────────────────────────────", nodes.len());
+    println!(
+        "┌─ NODES ({}) ──────────────────────────────────────────────────",
+        nodes.len()
+    );
     for (i, node) in nodes.iter().enumerate() {
         let node_id = node.get_id()?;
         let hash = hex::encode(node_id.get_hash()?);
-        
+
         print!("│ [{}] ", i);
         print!("Hash: {}... ", &hash[..16]);
-        
+
         match node.which()? {
             node::Constant(tensor_reader) => {
                 let tensor = tensor_reader?;
                 let shape: Vec<u32> = tensor.get_shape()?.iter().collect();
                 let data = tensor.get_data()?;
                 if shape == vec![1] && data.len() == 1 {
-                    println!("CONSTANT Scalar({}) conf={:.2}", data.get(0), tensor.get_confidence());
+                    println!(
+                        "CONSTANT Scalar({}) conf={:.2}",
+                        data.get(0),
+                        tensor.get_confidence()
+                    );
                 } else {
-                    println!("CONSTANT Tensor<{:?}> conf={:.2}", shape, tensor.get_confidence());
+                    println!(
+                        "CONSTANT Tensor<{:?}> conf={:.2}",
+                        shape,
+                        tensor.get_confidence()
+                    );
                 }
             }
             node::Operation(op) => {
-                println!("OPERATION {:?} inputs={}", op.get_op()?, op.get_inputs()?.len());
+                println!(
+                    "OPERATION {:?} inputs={}",
+                    op.get_op()?,
+                    op.get_inputs()?.len()
+                );
             }
             node::External(ext) => {
                 println!("EXTERNAL uri={:?}", ext.get_uri()?);
@@ -209,15 +228,22 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("└────────────────────────────────────────────────────────────────");
     println!();
-    
+
     // Proofs
     let proofs = graph_reader.get_proofs()?;
-    println!("┌─ PROOFS ({}) ──────────────────────────────────────────────────", proofs.len());
+    println!(
+        "┌─ PROOFS ({}) ──────────────────────────────────────────────────",
+        proofs.len()
+    );
     for (i, proof) in proofs.iter().enumerate() {
         print!("│ [{}] ", i);
         match proof.which()? {
             proof::Halting(h) => {
-                println!("HALTING max_steps={} fuel={}", h.get_max_steps(), h.get_fuel_budget());
+                println!(
+                    "HALTING max_steps={} fuel={}",
+                    h.get_max_steps(),
+                    h.get_fuel_budget()
+                );
             }
             proof::ShapeValid(_) => println!("SHAPE_VALID"),
             proof::Signature(_) => println!("SIGNATURE"),
@@ -226,17 +252,17 @@ fn inspect_graph(input: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("└────────────────────────────────────────────────────────────────");
     println!();
-    
+
     // Entry point
     let entry = graph_reader.get_entry_point()?;
     println!("Entry Point: {}...", &hex::encode(entry.get_hash()?)[..16]);
-    
+
     // Outputs
     let outputs = graph_reader.get_outputs()?;
     println!("Outputs: {}", outputs.len());
-    
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
-    
+
     Ok(())
 }

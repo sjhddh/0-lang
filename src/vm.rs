@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::graph::{RuntimeGraph, RuntimeNode, NodeHash, Op, GraphError};
+use crate::graph::{GraphError, NodeHash, Op, RuntimeGraph, RuntimeNode};
 use crate::Tensor;
 
 /// The ZeroLang Virtual Machine
@@ -44,7 +44,8 @@ impl VM {
         self.ops_executed = 0;
 
         // Get topological order
-        let order = graph.topological_sort()
+        let order = graph
+            .topological_sort()
             .map_err(|e| VMError::GraphError(e))?;
 
         // Execute nodes in order
@@ -55,7 +56,9 @@ impl VM {
         // Collect outputs
         let mut outputs = Vec::new();
         for output_hash in &graph.outputs {
-            let tensor = self.memory.get(output_hash)
+            let tensor = self
+                .memory
+                .get(output_hash)
                 .ok_or_else(|| VMError::NodeNotComputed(hex::encode(output_hash)))?
                 .clone();
             outputs.push(tensor);
@@ -71,7 +74,9 @@ impl VM {
             return Err(VMError::OutOfFuel);
         }
 
-        let node = graph.nodes.get(hash)
+        let node = graph
+            .nodes
+            .get(hash)
             .ok_or_else(|| VMError::NodeNotFound(hex::encode(hash)))?;
 
         let result = match node {
@@ -83,7 +88,12 @@ impl VM {
                 self.ops_executed += 1;
                 self.execute_operation(*op, inputs)?
             }
-            RuntimeNode::Branch { condition, threshold, true_branch, false_branch } => {
+            RuntimeNode::Branch {
+                condition,
+                threshold,
+                true_branch,
+                false_branch,
+            } => {
                 self.ops_executed += 1;
                 self.execute_branch(condition, *threshold, true_branch, false_branch)?
             }
@@ -96,9 +106,11 @@ impl VM {
     /// Execute an operation on input tensors
     fn execute_operation(&self, op: Op, inputs: &[NodeHash]) -> Result<Tensor, VMError> {
         // Fetch input tensors
-        let input_tensors: Result<Vec<&Tensor>, VMError> = inputs.iter()
+        let input_tensors: Result<Vec<&Tensor>, VMError> = inputs
+            .iter()
             .map(|h| {
-                self.memory.get(h)
+                self.memory
+                    .get(h)
                     .ok_or_else(|| VMError::NodeNotComputed(hex::encode(h)))
             })
             .collect();
@@ -108,49 +120,74 @@ impl VM {
             // Binary operations
             Op::Add => {
                 if input_tensors.len() != 2 {
-                    return Err(VMError::WrongInputCount { expected: 2, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 2,
+                        got: input_tensors.len(),
+                    });
                 }
-                input_tensors[0].checked_add(input_tensors[1])
+                input_tensors[0]
+                    .checked_add(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))
             }
             Op::Sub => {
                 if input_tensors.len() != 2 {
-                    return Err(VMError::WrongInputCount { expected: 2, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 2,
+                        got: input_tensors.len(),
+                    });
                 }
-                input_tensors[0].checked_sub(input_tensors[1])
+                input_tensors[0]
+                    .checked_sub(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))
             }
             Op::Mul => {
                 if input_tensors.len() != 2 {
-                    return Err(VMError::WrongInputCount { expected: 2, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 2,
+                        got: input_tensors.len(),
+                    });
                 }
-                input_tensors[0].checked_mul(input_tensors[1])
+                input_tensors[0]
+                    .checked_mul(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))
             }
             Op::Div => {
                 if input_tensors.len() != 2 {
-                    return Err(VMError::WrongInputCount { expected: 2, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 2,
+                        got: input_tensors.len(),
+                    });
                 }
-                input_tensors[0].checked_div(input_tensors[1])
+                input_tensors[0]
+                    .checked_div(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))
             }
 
             // Unary operations
             Op::Relu => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].relu())
             }
             Op::Sigmoid => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].sigmoid())
             }
             Op::Tanh => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].tanh())
             }
@@ -158,13 +195,19 @@ impl VM {
             // Reductions
             Op::Sum => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].sum())
             }
             Op::Mean => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].mean())
             }
@@ -172,7 +215,10 @@ impl VM {
             // Special
             Op::Identity => {
                 if input_tensors.len() != 1 {
-                    return Err(VMError::WrongInputCount { expected: 1, got: input_tensors.len() });
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
                 }
                 Ok(input_tensors[0].clone())
             }
@@ -188,7 +234,9 @@ impl VM {
         false_branch: &NodeHash,
     ) -> Result<Tensor, VMError> {
         // Get condition tensor (must be scalar)
-        let cond_tensor = self.memory.get(condition)
+        let cond_tensor = self
+            .memory
+            .get(condition)
             .ok_or_else(|| VMError::NodeNotComputed(hex::encode(condition)))?;
 
         if !cond_tensor.is_scalar() {
@@ -205,7 +253,8 @@ impl VM {
         };
 
         // Return the tensor from the chosen branch
-        self.memory.get(branch_hash)
+        self.memory
+            .get(branch_hash)
             .ok_or_else(|| VMError::NodeNotComputed(hex::encode(branch_hash)))
             .map(|t| t.clone())
     }
@@ -293,16 +342,14 @@ mod tests {
         };
 
         // Node 1: Constant 10.0
-        graph.nodes.insert(
-            vec![1],
-            RuntimeNode::Constant(Tensor::scalar(10.0, 1.0)),
-        );
+        graph
+            .nodes
+            .insert(vec![1], RuntimeNode::Constant(Tensor::scalar(10.0, 1.0)));
 
         // Node 2: Constant 20.0
-        graph.nodes.insert(
-            vec![2],
-            RuntimeNode::Constant(Tensor::scalar(20.0, 0.9)),
-        );
+        graph
+            .nodes
+            .insert(vec![2], RuntimeNode::Constant(Tensor::scalar(20.0, 0.9)));
 
         // Node 3: Add Node1 + Node2
         graph.nodes.insert(
