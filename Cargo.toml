@@ -1,0 +1,19 @@
+[package]
+name = "zerolang"
+version = "0.1.0"
+edition = "2021"
+description = "Agent-to-Agent programming language"
+license = "Apache-2.0"
+
+[[bin]]
+name = "zero"
+path = "src/main.rs"
+
+[dependencies]
+capnp = "0.20"
+sha2 = "0.10"
+hex = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+
+[build-dependencies]
+capnpc = "0.20"
