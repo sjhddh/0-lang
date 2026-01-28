@@ -158,10 +158,10 @@ cargo run -- execute hello_world.0
 
 ## Verification
 
-To ensure the language remains consistent across all Agents, we enforce a strict "Golden Rule" verification suite.
+To ensure the language remains consistent across all Agents, we enforce a strict **Zero Entropy Verification** suite.
 
 ```bash
-# Run the Golden Rule tests
+# Run the Zero Entropy tests
 cargo test
 ```
 

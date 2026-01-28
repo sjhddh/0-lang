@@ -11,10 +11,10 @@ env:
 
 jobs:
   # ==========================================================================
-  # Golden Rule Verification
+  # Zero Entropy Verification
   # ==========================================================================
   test:
-    name: Golden Rule Tests
+    name: Zero Entropy Verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
-      - name: Run Golden Rule Tests
+      - name: Run Zero Entropy Verification
         run: cargo test --verbose
 
   # ==========================================================================

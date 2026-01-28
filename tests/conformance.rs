@@ -1,7 +1,8 @@
-//! Conformance Tests - The Golden Rules of ZeroLang
+//! Conformance Tests - Zero Entropy Verification
 //!
 //! These tests ensure that the core language behavior remains consistent.
-//! Every PR must pass these tests.
+//! Every PR must pass these tests to ensure no "human entropy" (ambiguity)
+//! is introduced into the system.
 
 use zerolang::{stdlib, RuntimeGraph, VM};
 use capnp::serialize;
