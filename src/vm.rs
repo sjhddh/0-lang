@@ -124,9 +124,7 @@ impl VM {
         self.ops_executed = 0;
 
         // Get topological order
-        let order = graph
-            .topological_sort()
-            .map_err(VMError::GraphError)?;
+        let order = graph.topological_sort().map_err(VMError::GraphError)?;
 
         // Execute nodes in order
         for hash in order {
