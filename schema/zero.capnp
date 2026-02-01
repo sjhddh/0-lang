@@ -49,6 +49,12 @@ struct Node {
       trueBranch @8 :NodeId;
       falseBranch @9 :NodeId;
     }
+    
+    # State node for persistent values across executions (positions, balances)
+    state :group {
+      key @10 :Text;            # Unique key for state storage
+      default @11 :Tensor;      # Default value if state doesn't exist
+    }
   }
 }
 
@@ -93,6 +99,11 @@ enum Operation {
   abs @24;         # Absolute value
   neg @25;         # Negation
   clamp @26;       # Clamp to range (useful for position limits)
+  
+  # JSON operations (for API responses)
+  jsonParse @27;   # Parse JSON string into structured tensor
+  jsonGet @28;     # Extract value by key path (e.g., "data.price")
+  jsonArray @29;   # Extract array elements
 }
 
 struct Proof {

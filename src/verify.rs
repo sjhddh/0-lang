@@ -15,10 +15,11 @@ const HASH_PREFIX_CONSTANT: u8 = 0x01;
 const HASH_PREFIX_OPERATION: u8 = 0x02;
 const HASH_PREFIX_BRANCH: u8 = 0x03;
 const HASH_PREFIX_EXTERNAL: u8 = 0x04;
+const HASH_PREFIX_STATE: u8 = 0x05;
 
 /// Compute the canonical hash of a Tensor.
 ///
-/// Format: shape_len (u32 LE) + shape dims (u32 LE each) + data (f32 LE each) + confidence (f32 LE)
+/// Format: shape_len (u32 LE) + shape dims (u32 LE each) + data bytes + confidence (f32 LE)
 pub fn hash_tensor(tensor: &Tensor) -> Vec<u8> {
     let mut hasher = Sha256::new();
 
@@ -30,10 +31,8 @@ pub fn hash_tensor(tensor: &Tensor) -> Vec<u8> {
         hasher.update(dim.to_le_bytes());
     }
 
-    // Data
-    for &val in &tensor.data {
-        hasher.update(val.to_le_bytes());
-    }
+    // Data - use the to_bytes method which handles all TensorData variants
+    hasher.update(&tensor.to_bytes());
 
     // Confidence
     hasher.update(tensor.confidence.to_le_bytes());
@@ -113,6 +112,24 @@ pub fn hash_external_node(uri: &str, inputs: &[NodeHash]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+/// Compute the canonical hash of a State node.
+///
+/// Format: PREFIX_STATE + key_len (u32 LE) + key_bytes + tensor_hash
+pub fn hash_state_node(key: &str, default: &Tensor) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update([HASH_PREFIX_STATE]);
+
+    // Key
+    let key_bytes = key.as_bytes();
+    hasher.update((key_bytes.len() as u32).to_le_bytes());
+    hasher.update(key_bytes);
+
+    // Default tensor hash
+    hasher.update(hash_tensor(default));
+
+    hasher.finalize().to_vec()
+}
+
 /// Compute the canonical hash of a RuntimeNode.
 pub fn hash_node(node: &RuntimeNode) -> Vec<u8> {
     match node {
@@ -125,6 +142,7 @@ pub fn hash_node(node: &RuntimeNode) -> Vec<u8> {
             false_branch,
         } => hash_branch_node(condition, *threshold, true_branch, false_branch),
         RuntimeNode::External { uri, inputs } => hash_external_node(uri, inputs),
+        RuntimeNode::State { key, default } => hash_state_node(key, default),
     }
 }
 
@@ -159,6 +177,10 @@ fn op_to_byte(op: Op) -> u8 {
         Op::Abs => 24,
         Op::Neg => 25,
         Op::Clamp => 26,
+        // JSON operations
+        Op::JsonParse => 27,
+        Op::JsonGet => 28,
+        Op::JsonArray => 29,
     }
 }
 
@@ -336,6 +358,9 @@ pub fn verify_graph(
         // Verify all referenced nodes exist
         match node {
             RuntimeNode::Constant(_) => {}
+            RuntimeNode::State { .. } => {
+                // State nodes don't reference other nodes
+            }
             RuntimeNode::Operation { inputs, .. } => {
                 for input in inputs {
                     if !graph.nodes.contains_key(input) {
@@ -401,6 +426,7 @@ fn verify_no_cycles(graph: &RuntimeGraph) -> Result<(), VerifyError> {
         if let Some(node) = graph.nodes.get(hash) {
             let deps: Vec<&NodeHash> = match node {
                 RuntimeNode::Constant(_) => vec![],
+                RuntimeNode::State { .. } => vec![], // State nodes have no dependencies
                 RuntimeNode::Operation { inputs, .. } => inputs.iter().collect(),
                 RuntimeNode::Branch {
                     condition,

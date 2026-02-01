@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::graph::{GraphError, NodeHash, Op, RuntimeGraph, RuntimeNode};
+use crate::stdlib::json::{json_array, json_get, json_parse};
+use crate::tensor::TensorData;
 use crate::Tensor;
 
 /// Trait for resolving external node calls.
@@ -71,6 +73,8 @@ pub struct VM {
     ops_executed: u64,
     /// External resolver for handling External nodes
     external_resolver: Option<Arc<dyn ExternalResolver>>,
+    /// Persistent state storage (key -> tensor)
+    state: HashMap<String, Tensor>,
 }
 
 impl VM {
@@ -81,6 +85,7 @@ impl VM {
             fuel: 1_000_000, // Default: 1 million operations
             ops_executed: 0,
             external_resolver: None,
+            state: HashMap::new(),
         }
     }
 
@@ -91,6 +96,7 @@ impl VM {
             fuel,
             ops_executed: 0,
             external_resolver: None,
+            state: HashMap::new(),
         }
     }
 
@@ -101,6 +107,21 @@ impl VM {
         } else {
             Self::new()
         }
+    }
+
+    /// Get a reference to the VM's persistent state
+    pub fn get_state(&self) -> &HashMap<String, Tensor> {
+        &self.state
+    }
+
+    /// Get a mutable reference to the VM's persistent state
+    pub fn get_state_mut(&mut self) -> &mut HashMap<String, Tensor> {
+        &mut self.state
+    }
+
+    /// Set a state value
+    pub fn set_state(&mut self, key: String, value: Tensor) {
+        self.state.insert(key, value);
     }
 
     /// Set an external resolver for handling External nodes
@@ -178,6 +199,10 @@ impl VM {
             RuntimeNode::External { uri, inputs } => {
                 self.ops_executed += 1;
                 self.execute_external(uri, inputs)?
+            }
+            RuntimeNode::State { key, default } => {
+                // State nodes return persisted value or default
+                self.state.get(key).cloned().unwrap_or_else(|| default.clone())
             }
         };
 
@@ -375,7 +400,7 @@ impl VM {
                     .lt(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))?;
                 // Invert: 1.0 - result (since comparison returns 0 or 1)
-                let inverted: Vec<f32> = lt_result.data.iter().map(|&v| 1.0 - v).collect();
+                let inverted: Vec<f32> = lt_result.float_data().iter().map(|&v| 1.0 - v).collect();
                 Ok(Tensor::new(lt_result.shape, inverted, lt_result.confidence))
             }
             Op::Lte => {
@@ -389,7 +414,7 @@ impl VM {
                 let gt_result = input_tensors[0]
                     .gt(input_tensors[1])
                     .map_err(|e| VMError::TensorError(e.to_string()))?;
-                let inverted: Vec<f32> = gt_result.data.iter().map(|&v| 1.0 - v).collect();
+                let inverted: Vec<f32> = gt_result.float_data().iter().map(|&v| 1.0 - v).collect();
                 Ok(Tensor::new(gt_result.shape, inverted, gt_result.confidence))
             }
 
@@ -409,7 +434,7 @@ impl VM {
                 if input_tensors.len() == 1 {
                     // Reduction: find minimum value
                     let min_val = input_tensors[0]
-                        .data
+                        .float_data()
                         .iter()
                         .cloned()
                         .fold(f32::INFINITY, f32::min);
@@ -420,9 +445,9 @@ impl VM {
                         return Err(VMError::TensorError("Shape mismatch for Min".to_string()));
                     }
                     let data: Vec<f32> = input_tensors[0]
-                        .data
+                        .float_data()
                         .iter()
-                        .zip(input_tensors[1].data.iter())
+                        .zip(input_tensors[1].float_data().iter())
                         .map(|(&a, &b)| a.min(b))
                         .collect();
                     let confidence = input_tensors[0].confidence.min(input_tensors[1].confidence);
@@ -440,7 +465,7 @@ impl VM {
                 if input_tensors.len() == 1 {
                     // Reduction: find maximum value
                     let max_val = input_tensors[0]
-                        .data
+                        .float_data()
                         .iter()
                         .cloned()
                         .fold(f32::NEG_INFINITY, f32::max);
@@ -451,9 +476,9 @@ impl VM {
                         return Err(VMError::TensorError("Shape mismatch for Max".to_string()));
                     }
                     let data: Vec<f32> = input_tensors[0]
-                        .data
+                        .float_data()
                         .iter()
-                        .zip(input_tensors[1].data.iter())
+                        .zip(input_tensors[1].float_data().iter())
                         .map(|(&a, &b)| a.max(b))
                         .collect();
                     let confidence = input_tensors[0].confidence.min(input_tensors[1].confidence);
@@ -476,7 +501,7 @@ impl VM {
                         got: input_tensors.len(),
                     });
                 }
-                let new_shape: Vec<u32> = input_tensors[1].data.iter().map(|&x| x as u32).collect();
+                let new_shape: Vec<u32> = input_tensors[1].float_data().iter().map(|&x| x as u32).collect();
                 input_tensors[0]
                     .reshape(new_shape)
                     .map_err(|e| VMError::TensorError(e.to_string()))
@@ -513,18 +538,19 @@ impl VM {
                 }
                 // Create a 768-dim embedding from the input tensor's data
                 // This is a placeholder - a real implementation might use a lookup table
-                let input_len = input_tensors[0].data.len().min(768);
+                let float_data = input_tensors[0].float_data();
+                let input_len = float_data.len().min(768);
                 let mut embedding = vec![0.0f32; 768];
-                embedding[..input_len].copy_from_slice(&input_tensors[0].data[..input_len]);
+                embedding[..input_len].copy_from_slice(&float_data[..input_len]);
                 // Fill remaining with deterministic pattern based on existing values
                 for (i, val) in embedding.iter_mut().enumerate().skip(input_len) {
                     *val = ((i as f32) * 0.1).sin() * 0.5 + 0.5;
                 }
-                Ok(Tensor {
-                    shape: vec![768],
-                    data: embedding,
-                    confidence: input_tensors[0].confidence,
-                })
+                Ok(Tensor::new(
+                    vec![768],
+                    embedding,
+                    input_tensors[0].confidence,
+                ))
             }
 
             // Abs - absolute value
@@ -535,7 +561,7 @@ impl VM {
                         got: input_tensors.len(),
                     });
                 }
-                let data: Vec<f32> = input_tensors[0].data.iter().map(|&v| v.abs()).collect();
+                let data: Vec<f32> = input_tensors[0].float_data().iter().map(|&v| v.abs()).collect();
                 Ok(Tensor::new(
                     input_tensors[0].shape.clone(),
                     data,
@@ -551,7 +577,7 @@ impl VM {
                         got: input_tensors.len(),
                     });
                 }
-                let data: Vec<f32> = input_tensors[0].data.iter().map(|&v| -v).collect();
+                let data: Vec<f32> = input_tensors[0].float_data().iter().map(|&v| -v).collect();
                 Ok(Tensor::new(
                     input_tensors[0].shape.clone(),
                     data,
@@ -571,7 +597,7 @@ impl VM {
                 let min_val = input_tensors[1].as_scalar();
                 let max_val = input_tensors[2].as_scalar();
                 let data: Vec<f32> = input_tensors[0]
-                    .data
+                    .float_data()
                     .iter()
                     .map(|&v| v.clamp(min_val, max_val))
                     .collect();
@@ -580,6 +606,45 @@ impl VM {
                     data,
                     input_tensors[0].confidence,
                 ))
+            }
+
+            // JSON Operations
+            Op::JsonParse => {
+                if input_tensors.len() != 1 {
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
+                }
+                json_parse(input_tensors[0])
+                    .map_err(|e| VMError::TensorError(e.to_string()))
+            }
+
+            Op::JsonGet => {
+                // JsonGet expects 2 inputs: JSON tensor and key path tensor
+                if input_tensors.len() != 2 {
+                    return Err(VMError::WrongInputCount {
+                        expected: 2,
+                        got: input_tensors.len(),
+                    });
+                }
+                let key_path = match &input_tensors[1].data {
+                    TensorData::String(v) if !v.is_empty() => v[0].clone(),
+                    _ => return Err(VMError::TensorError("JsonGet requires string key path".to_string())),
+                };
+                json_get(input_tensors[0], &key_path)
+                    .map_err(|e| VMError::TensorError(e.to_string()))
+            }
+
+            Op::JsonArray => {
+                if input_tensors.len() != 1 {
+                    return Err(VMError::WrongInputCount {
+                        expected: 1,
+                        got: input_tensors.len(),
+                    });
+                }
+                json_array(input_tensors[0])
+                    .map_err(|e| VMError::TensorError(e.to_string()))
             }
         }
     }

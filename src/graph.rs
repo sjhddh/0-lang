@@ -32,6 +32,8 @@ pub enum RuntimeNode {
     },
     /// External reference (FFI, other graphs)
     External { uri: String, inputs: Vec<NodeHash> },
+    /// Mutable state across executions (positions, balances)
+    State { key: String, default: Tensor },
 }
 
 /// Supported operations (matches schema/zero.capnp Operation enum)
@@ -70,6 +72,10 @@ pub enum Op {
     Abs,    // Absolute value
     Neg,    // Negation
     Clamp,  // Clamp values to range (useful for position limits)
+    // JSON operations (for API responses)
+    JsonParse,  // Parse JSON string into structured tensor
+    JsonGet,    // Extract value by key path (e.g., "data.price")
+    JsonArray,  // Extract array elements
 }
 
 impl Op {
@@ -110,6 +116,10 @@ impl Op {
             Operation::Abs => Ok(Op::Abs),
             Operation::Neg => Ok(Op::Neg),
             Operation::Clamp => Ok(Op::Clamp),
+            // JSON operations
+            Operation::JsonParse => Ok(Op::JsonParse),
+            Operation::JsonGet => Ok(Op::JsonGet),
+            Operation::JsonArray => Ok(Op::JsonArray),
         }
     }
 }
@@ -295,6 +305,28 @@ impl RuntimeGraph {
                     }
                     RuntimeNode::External { uri, inputs }
                 }
+                node::State(st) => {
+                    let key = st
+                        .get_key()
+                        .map_err(|e| GraphError::ParseError(e.to_string()))?
+                        .to_string()
+                        .map_err(|e| GraphError::ParseError(format!("Invalid key: {:?}", e)))?;
+                    let default_tensor =
+                        st.get_default().map_err(|e| GraphError::ParseError(e.to_string()))?;
+                    let shape: Vec<u32> = default_tensor
+                        .get_shape()
+                        .map_err(|e| GraphError::ParseError(e.to_string()))?
+                        .iter()
+                        .collect();
+                    let data: Vec<f32> = default_tensor
+                        .get_data()
+                        .map_err(|e| GraphError::ParseError(e.to_string()))?
+                        .iter()
+                        .collect();
+                    let confidence = default_tensor.get_confidence();
+                    let default = Tensor::new(shape, data, confidence);
+                    RuntimeNode::State { key, default }
+                }
             };
 
             nodes.insert(hash, runtime_node);
@@ -399,6 +431,9 @@ impl RuntimeGraph {
             match node {
                 RuntimeNode::Constant(_) => {
                     // No dependencies
+                }
+                RuntimeNode::State { .. } => {
+                    // State nodes have no dependencies (they're like constants with persistence)
                 }
                 RuntimeNode::Operation { inputs, .. } => {
                     for input in inputs {

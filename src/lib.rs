@@ -2,6 +2,7 @@
 //!
 //! No syntax sugar. No whitespace. No variable names. Pure logic density.
 
+pub mod events;
 pub mod graph;
 pub mod resolvers;
 pub mod stdlib;
@@ -17,9 +18,15 @@ pub mod zero_capnp {
 // Re-export commonly used types
 pub use graph::{Op, RuntimeGraph, RuntimeNode, RuntimeProof};
 pub use resolvers::{HttpMethod, HttpResolver, HttpResolverBuilder};
-pub use tensor::Tensor;
+pub use tensor::{Tensor, TensorData, TensorError};
 pub use verify::{verify_graph, HaltingProofInfo, VerifyError, VerifyOptions, VerifyResult};
 pub use vm::{ExternalResolver, MockResolver, RejectingResolver, VMError, VM};
+
+// Re-export events module
+pub use events::{EventDispatcher, EventHandler, OrderStatus, SimpleEventHandler, TradingEvent};
+
+// Re-export JSON utilities
+pub use stdlib::json::{json_array, json_get, json_parse, JsonError};
 
 use sha2::{Digest, Sha256};
 
